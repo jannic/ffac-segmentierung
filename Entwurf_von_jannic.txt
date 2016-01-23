@@ -1,0 +1,139 @@
+High-Level-Ziele
+================
+
+- Möglichst viele, etwa gleich große Segmente, um Last in den
+  einzelnen Segmenten zu senken
+- Roaming nicht unnötig behindern
+- Transparent für Node-Betreiber und Nutzer
+- Fehlertolerant
+
+Abgeleitete Ziele
+=================
+- 'Kurzschlüsse' (Verbindungen der Batman-Meshes) zwischen den Segmenten vermeiden
+- Neue Nodes ohne Mesh-Verbindung in existierende Segmente geographisch
+  zuordnen (verbessert Roaming)
+- Zentrale Komponenten sollten optional sein, Supernodes sollen auch
+  autark agieren können.
+
+Persistente Datenstrukturen
+===========================
+
+Supernodes
+----------
+Node-Id,Segment,(Kommentar)
+
+Diese Werte sind fix (werden nicht dynamisch angepasst). Admins müssen
+sicherstellen, dass die direkten Verbindungen zwischen den Supernodes
+keine Verbindungen zwischen verschiedenen Segmenten erzeugen.
+
+Fastd-Links
+-----------
+
+Fastd-Key,Segment,Änderungs-Datum,Last-Seen-Datum,Priorität,(Kommentar)
+
+Definition von 'Priorität':
+
+(0: Fix vom Admin festgelegt (?))
+1: Manuell von Admin festgelegt, darf aber automatisch geändert werden
+2: Manuell von Benutzer festgelegt, darf aber automatisch geändert werden
+3: Automatisch ermittelt
+
+Lese- und Schreibzugriffe können lokal gecacht werden.
+
+Bei konkurrierenden Schreibzugriffen auf die Datenbank gewinnt immer der
+Zugriff mit dem neueren Änderungsdatum, bei Gleichstand mit dem neueren
+Last-Seen-Datum.
+
+Hiermit sollte eine 'eventual consistency' gewährleistet sein.
+
+Definitionen
+============
+
+Kurzschluss: Verbindung von zwei Segment-Supernodes über das Batman-Mesh.
+
+Kann detektiert werden, indem man in graph.json bzw. mit batctl nachschaut.
+
+Algorithmen auf Supernodes
+==========================
+
+Diese Algorithmen laufen lokal auf jedem einzelnen Supernode ab, ohne dass
+dabei direkt mit anderen Supernodes kommuniziert würde. Hierbei wird
+auch so getan, als habe jedes Segment komplett eigene Supernodes. Dass
+die bei uns zufällig gemeinsam auf einem Rechner laufen, ist ein
+Implementierungsdetail.
+
+Situation: Einkommende Fastd-Connection mit bekanntem Key
+Reaktion: Key nur in dem Segment zulassen, dem der Key zugeordnet ist
+
+Situation: Einkommende Fastd-Connection mit unbekanntem Key
+Reaktion: Key nur in Default-Segment zulassen, und mit Default-Segment in Datenbank schreiben
+
+Situation: Erfolgreicher Fastd-Verbindungsaufbau
+Reaktion: Last-Seen-Datum aktualisieren
+
+Situation: Vorhandener Fastd-Link soll in ein anderes Segment geschoben werden (kommt weiter unten mehrfach vor)
+Reaktion: Eintrag in Datenbank anpassen. Wenn der Fastd-Link zur Zeit lokal aktiv ist, diesen Link beenden.
+          (Kann ein einzelner Fastd-Link beendet werden? Ich sehe im Moment nur SIGUSR2 am fastd schicken,
+	  aber das beendet alle Links.)
+
+Situation: Kurzschluss detektiert
+Reaktion:
+	- Sonderfall: Kurzschluss mit 1 Hop (direkte Bridge zu anderem
+	  Supernode) -> Fastd-Link ins Default-Segment schieben. (Oder 'Clusterfuck-Segment'? Blacklist?)
+	- ermittle alle beteiligten Fastd-Links
+	  -> Sicher bekannt sind die Fastd-Links vom lokalen Supernode
+	  -> Über die Routing-Informationen ist bekannt, welche anderen
+             Segmente beteiligt sind (Man sieht Routen zu Supernodes aus
+             anderen Segmenten. Letzer Node in einer Route sollte zu
+	     einem Fastd-Link zu einem anderen Supernode gehören)
+	  -> Über die (eventuell veraltete) Datenbank können diesen Nodes
+             die jeweiligen Fastd-Keys zugeordnet werden.
+	     Das muss aber nicht genau der Realität entsprechen.
+	- (ggf. Sonderfall behandeln: Gibt es ein Segment, zu dem nur
+	  ein beteiligter Link gehört, und ist dies entweder das
+	  Default-Segment, oder das Default-Segment ist am Kurzschluss
+	  nicht beteiligt, dann schiebe diesen einen Link in das jeweils
+	  andere Segment. Hat der Kurzschluss in beide Segmente nur
+	  jeweils einen Link, dann schiebe den jüngeren.)
+	- sortiere diese Links nach:
+		- Priorität (niedrige zuerst), wenn Ist-Segment mit Soll-Segment übereinstimmt. (Sonst? Nach hinten sortieren?)
+		- Größe des Segments (kleine zuerst, Default-Segment immer hinter allen anderen) (-> kleinere Segmente sollen wachsen)
+		- Last-Seen-Datum (ältere zuerst) (-> stabile Links werden bevorzugt)
+	- der nun erste Eintrag gibt an, in welches Segment alle anderen Links wandern müssen
+	- alle Links in andere Segmente in das ausgewählte Segment verschieben.
+	  (Müsste dabei ein Link der Prio 0 unterbrochen werden -> Fehler! Abbrechen, Kurzschluss an Admins melden)
+
+Situation: Link ohne Kurzschluss im Default-Segment vorhanden
+Reaktion:
+        (Hier kann man sich austoben. Geo-Koordinaten auswerten, Größen der Segmente berücksichtigen etc., als einfaches
+	Beispiel könnte reichen:)
+	- existiert Link schon >X Minuten? Wenn nicht: Erstmal warten, ob noch eine Mesh-Verbindung zu einem
+	  vorhandenen Segment auftaucht.
+	- Hängen an dem Link Nodes mit Geokoordinaten?
+	  Wenn ja: Bestimme für das Gebiet vorgesehene Segmente.
+	  Wenn nein: Weiter mit allen (nicht-Default-)Segmenten.
+	- Nimm von diesen Segmenten das kleinste
+	- Schiebe den Link in dieses Segment.
+	  (An dieser Stelle kann ggf. auf SIGUSR2 verzichtet werden, da es nicht eilig ist,
+	  den Link aus dem Default-Segment zu entfernen.)
+
+Inkonsistenzen
+==============
+
+Durch den Verzicht auf einen zentralen Koordinator können die einzelnen Supernodes inkonsistente
+Datenbanken haben. Außerdem werden die Black/Whitelists nur bei neuen Verbindungen konsultiert, daher
+können noch Verbindungen bestehen, die nach der aktuellen Datenbank gar nicht mehr erlaubt wären.
+
+Solange hierdurch kein Kurzschluss entsteht, ist das nicht weiter schlimm - die Nodes laufen
+vorübergehend über das falsche Segment, so lange, bis die Fastd-Links aus anderen Gründen beendet und neu
+aufgebaut werden. (Node-Restart, Verbindungsabbruch, Supernode-Restart, SIGUSR2 wegen einer anderen Änderung, ...)
+
+Wird ein Kurzschluss durch einen inkonsistenten Zustand ausgelöst, wird auf allen beteiligten
+Supernodes der Algorithmus "Kurzschluss detektiert" aufgerufen.
+
+
+
+Fragen
+======
+Gibt es immer eine eindeutige Zuordnung Node-ID <-> batman-mac-adresse?
+(Und unterscheiden die sich immer nur durch die Doppelpunkte?)
