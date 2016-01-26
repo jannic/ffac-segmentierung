@@ -7,6 +7,16 @@ High-Level-Ziele
 - Transparent für Node-Betreiber und Nutzer
 - Fehlertolerant
 
+Rahmenbedingungen
+=================
+
+Bisher ist vorgesehen, mit unveränderter Gluon-Firmware zu arbeiten.
+
+Mit Änderungen an der Firmware könnten wir Kurzschlüsse weitestgehend
+oder ganz vermeiden, da wir dann verhindern könnten, dass Nodes in
+verschiedenen Segmenten miteinander meshen. Dieser Ansatz wird hier
+nicht weiter verfolgt und sollte getrennt betrachtet werden.
+
 Abgeleitete Ziele
 =================
 - 'Kurzschlüsse' (Verbindungen der Batman-Meshes) zwischen den Segmenten vermeiden
