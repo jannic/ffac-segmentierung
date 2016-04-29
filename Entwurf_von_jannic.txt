@@ -74,17 +74,22 @@ Implementierungsdetail.
 
 Situation: Einkommende Fastd-Connection mit bekanntem Key
 Reaktion: Key nur in dem Segment zulassen, dem der Key zugeordnet ist
+Umsetzung: Peer-Definitionen in Config (über 'include peers from'), Master-Config auf Github
 
 Situation: Einkommende Fastd-Connection mit unbekanntem Key
 Reaktion: Key nur in Default-Segment zulassen, und mit Default-Segment in Datenbank schreiben
+Umsetzung: 'on verify'-Script verbietet im Default-Segment Keys, die einem Segment zugeordnet sind
 
 Situation: Erfolgreicher Fastd-Verbindungsaufbau
 Reaktion: Last-Seen-Datum aktualisieren
+Umsetzung: 'on establish'-Script (noch offen)
 
 Situation: Vorhandener Fastd-Link soll in ein anderes Segment geschoben werden (kommt weiter unten mehrfach vor)
 Reaktion: Eintrag in Datenbank anpassen. Wenn der Fastd-Link zur Zeit lokal aktiv ist, diesen Link beenden.
-          (Kann ein einzelner Fastd-Link beendet werden? Ich sehe im Moment nur SIGUSR2 am fastd schicken,
-	  aber das beendet alle Links.)
+Umsetzung: Eintrag im Github-Repo wird mit move_to_segment.sh geändert.
+           Daten von Github werden regelmäßig (zur Zeit alle 60s) von Github gepullt.
+           Bei Änderungen wird ein SIGHUP an die Fastds geschickt (SIGUSR2 für das Default-Segment, da
+           SIGHUP nur bei konfigurierten Fastd-Keys funktioniert.)
 
 Situation: Kurzschluss detektiert
 Reaktion:
@@ -112,6 +117,9 @@ Reaktion:
 	- der nun erste Eintrag gibt an, in welches Segment alle anderen Links wandern müssen
 	- alle Links in andere Segmente in das ausgewählte Segment verschieben.
 	  (Müsste dabei ein Link der Prio 0 unterbrochen werden -> Fehler! Abbrechen, Kurzschluss an Admins melden)
+Umsetzung: Bisher nur vereinfachtes Vorgehen: Bei Kurzschluss zum Default-Segment wird der Node aus dem
+           Default-Segment in das jeweils andere Segment geschoben.
+           In allen anderen Fällen erfolgt nur eine Alarmierung über Slack.
 
 Situation: Link ohne Kurzschluss im Default-Segment vorhanden
 Reaktion:
@@ -126,21 +134,13 @@ Reaktion:
 	- Schiebe den Link in dieses Segment.
 	  (An dieser Stelle kann ggf. auf SIGUSR2 verzichtet werden, da es nicht eilig ist,
 	  den Link aus dem Default-Segment zu entfernen.)
+Umsetzung: Bisher nur manuell aufgerufenes Script, das die Geokoordinaten auswertet.
 
 Inkonsistenzen
 ==============
 
-Durch den Verzicht auf einen zentralen Koordinator können die einzelnen Supernodes inkonsistente
-Datenbanken haben. Außerdem werden die Black/Whitelists nur bei neuen Verbindungen konsultiert, daher
-können noch Verbindungen bestehen, die nach der aktuellen Datenbank gar nicht mehr erlaubt wären.
-
-Solange hierdurch kein Kurzschluss entsteht, ist das nicht weiter schlimm - die Nodes laufen
-vorübergehend über das falsche Segment, so lange, bis die Fastd-Links aus anderen Gründen beendet und neu
-aufgebaut werden. (Node-Restart, Verbindungsabbruch, Supernode-Restart, SIGUSR2 wegen einer anderen Änderung, ...)
-
-Wird ein Kurzschluss durch einen inkonsistenten Zustand ausgelöst, wird auf allen beteiligten
-Supernodes der Algorithmus "Kurzschluss detektiert" aufgerufen.
-
+Durch den Schritt über Github sind die Datenbanken immer konsistent.
+Nachteil: Das ganze funktioniert nur, wenn Github erreichbar ist.
 
 
 Fragen
